@@ -1,133 +1,77 @@
 
 import os
 import json
-import time
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
-BASE_URL = "https://egy.voxcinemas.com"
-URL = BASE_URL + "/movies/whatson"
-
+URL = "https://egy.voxcinemas.com/"
 TOKEN = os.environ["TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-
 FILE = "seen.json"
 
-headers = {
-    "User-Agent": "Mozilla/5.0"
-}
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+})
 
+print("Connecting to VOX...")
 
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-
-for test_url in [BASE_URL, URL]:
-    print("\nTesting:", test_url)
-
-    try:
-        response = requests.get(
-            test_url,
-            headers=headers,
-            timeout=(10, 20)
-        )
-
-        print("Status:", response.status_code)
-        print("Final URL:", response.url)
-        print("Page size:", len(response.content))
-
-    except requests.RequestException as e:
-        print("FAILED:", repr(e))
-
-print("\nDiagnostic completed.")
-raise SystemExit(0)
+response = session.get(URL, timeout=(15, 60))
+response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
 
 movies = {}
 
-for a in soup.select('a[href]'):
-    href = urljoin(BASE_URL, a["href"])
-    path = urlparse(href).path.rstrip("/")
+for a in soup.select('a[href*="/movies/"]'):
+    title_tag = a.find_previous(["h2", "h3", "h4"])
 
-    if not path.startswith("/movies/"):
-        continue
+    name = (
+        title_tag.get_text(strip=True)
+        if title_tag
+        else a.get("title") or a.get_text(strip=True)
+    )
 
-    if path in ("/movies/whatson", "/movies/comingsoon"):
-        continue
+    if name and name.lower() != "view movie":
+        link = urljoin(URL, a["href"])
+        movies[link] = name
 
-    name = a.get_text(" ", strip=True)
-
-    if not name:
-        name = a.get("title", "")
-
-    if not name:
-        img = a.find("img")
-        if img:
-            name = img.get("alt", "")
-
-    if name and name.lower() != "showtimes":
-        movies[href] = name
+print("لقيت", len(movies), "فيلم")
 
 if not movies:
-    raise RuntimeError("No movies found. Check website structure.")
-
-print("Found:", len(movies), "movies")
+    raise SystemExit("مفيش أفلام اتعرفت")
 
 if os.path.exists(FILE):
     with open(FILE, encoding="utf-8") as f:
-        seen = json.load(f)
+        seen = set(json.load(f))
 else:
-    seen = {}
+    seen = set()
 
-if not isinstance(seen, dict):
-    seen = {}
+new_movies = set(movies) - seen
 
-# First run: save existing movies without sending old notifications
-if not seen:
-    with open(FILE, "w", encoding="utf-8") as f:
-        json.dump(movies, f, ensure_ascii=False, indent=2)
+print("الأفلام الجديدة:", len(new_movies))
 
-    print("Initial movie list saved.")
-    raise SystemExit(0)
+for link in sorted(new_movies):
+    message = f"🎬 فيلم جديد نزل على VOX!\n{movies[link]}\n{link}"
 
-new_movies = {
-    link: name
-    for link, name in movies.items()
-    if link not in seen
-}
-
-for link, name in new_movies.items():
-    message = f"🎬 فيلم جديد على VOX!\n\n{name}\n{link}"
-
-    for attempt in range(3):
-        try:
-            r = requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                data={
-                    "chat_id": CHAT_ID,
-                    "text": message
-                },
-                timeout=30
-            )
-            r.raise_for_status()
-
-            result = r.json()
-            if not result.get("ok"):
-                raise RuntimeError("Telegram rejected the message")
-
-            print("Sent:", name)
-            break
-
-        except requests.RequestException:
-            if attempt == 2:
-                raise
-            time.sleep(5)
-
-seen.update(movies)
+    response = requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        data={
+            "chat_id": CHAT_ID,
+            "text": message
+        },
+        timeout=20
+    )
+    response.raise_for_status()
 
 with open(FILE, "w", encoding="utf-8") as f:
-    json.dump(seen, f, ensure_ascii=False, indent=2)
+    json.dump(
+        sorted(seen | set(movies)),
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
 
-print("Finished successfully!")
+print("VOX checker completed successfully!")
