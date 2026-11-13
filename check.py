@@ -22,26 +22,26 @@ headers = {
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-session = requests.Session()
 
-retry = Retry(
-    total=4,
-    connect=4,
-    read=4,
-    backoff_factor=3,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"]
-)
+for test_url in [BASE_URL, URL]:
+    print("\nTesting:", test_url)
 
-session.mount("https://", HTTPAdapter(max_retries=retry))
+    try:
+        response = requests.get(
+            test_url,
+            headers=headers,
+            timeout=(10, 20)
+        )
 
-response = session.get(
-    URL,
-    headers=headers,
-    timeout=(15, 90)
-)
+        print("Status:", response.status_code)
+        print("Final URL:", response.url)
+        print("Page size:", len(response.content))
 
-response.raise_for_status()
+    except requests.RequestException as e:
+        print("FAILED:", repr(e))
+
+print("\nDiagnostic completed.")
+raise SystemExit(0)
 
 soup = BeautifulSoup(response.text, "html.parser")
 
