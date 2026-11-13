@@ -18,7 +18,29 @@ headers = {
     "User-Agent": "Mozilla/5.0"
 }
 
-response = requests.get(URL, headers=headers, timeout=30)
+
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+session = requests.Session()
+
+retry = Retry(
+    total=4,
+    connect=4,
+    read=4,
+    backoff_factor=3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"]
+)
+
+session.mount("https://", HTTPAdapter(max_retries=retry))
+
+response = session.get(
+    URL,
+    headers=headers,
+    timeout=(15, 90)
+)
+
 response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
